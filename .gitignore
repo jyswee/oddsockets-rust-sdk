@@ -1,0 +1,5 @@
+target/
+Cargo.lock
+.DS_Store
+*.log
+JAVASCRIPT_PATTERN_COMPLIANCE.md

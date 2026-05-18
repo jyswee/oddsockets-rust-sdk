@@ -1,0 +1,119 @@
+[package]
+name = "oddsockets"
+version = "0.1.0-beta.1"
+edition = "2021"
+rust-version = "1.70"
+authors = ["Joe Wee <jyswee@gmail.com>"]
+license = "MIT"
+description = "Official Rust SDK for OddSockets real-time messaging platform"
+homepage = "https://oddsockets.com"
+repository = "https://github.com/jyswee/oddsockets-rust-sdk"
+documentation = "https://docs.rs/oddsockets"
+readme = "README.md"
+keywords = ["websockets", "realtime", "messaging", "async", "tokio"]
+categories = ["network-programming", "web-programming", "asynchronous"]
+exclude = [
+    "examples/target/",
+    "tests/target/",
+    ".github/",
+    "*.log"
+]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.32", features = ["full"] }
+tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID generation
+uuid = { version = "1.4", features = ["v4", "serde"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async utilities
+futures = "0.3"
+futures-util = "0.3"
+
+# URL parsing
+url = "2.4"
+
+# Configuration
+config = "0.13"
+
+# Channels for async communication
+tokio-stream = "0.1"
+async-stream = "0.3"
+
+# Backoff for reconnection
+backoff = "0.4"
+
+# Network connectivity
+network-interface = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1.2"
+tempfile = "3.8"
+criterion = "0.5"
+
+[features]
+default = ["native-tls"]
+native-tls = ["tokio-tungstenite/native-tls"]
+rustls-tls = ["tokio-tungstenite/rustls-tls-native-roots"]
+
+# Performance optimizations
+performance = []
+
+# Development features
+dev = ["tokio/tracing"]
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "bulk_publishing"
+path = "examples/bulk_publishing.rs"
+
+[[example]]
+name = "chat_application"
+path = "examples/chat_application.rs"
+
+[[example]]
+name = "presence_tracking"
+path = "examples/presence_tracking.rs"
+
+[[bench]]
+name = "performance"
+harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+debug = true
+opt-level = 0
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.playground]
+features = ["tokio/full"]

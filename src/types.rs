@@ -14,7 +14,7 @@ pub mod constants {
     pub const SDK_VERSION: &str = "0.1.0-beta.1";
     pub const SDK_NAME: &str = "OddSockets-Rust-SDK";
     pub const USER_AGENT: &str = concat!("OddSockets-Rust-SDK/", "0.1.0-beta.1");
-    pub const DEFAULT_MANAGER_URL: &str = "https://manager1.oddsockets.tyga.network";
+    pub const DEFAULT_MANAGER_URL: &str = "https://connect.oddsockets.tyga.network";
     pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
     pub const DEFAULT_HEARTBEAT_INTERVAL_SECS: u64 = 30;
     pub const DEFAULT_RECONNECT_ATTEMPTS: u32 = 5;

@@ -17,7 +17,7 @@ impl ManagerDiscovery {
     /// Create a new ManagerDiscovery instance
     pub fn new() -> Self {
         Self {
-            manager_url: "https://manager1.oddsockets.tyga.network".to_string(),
+            manager_url: "https://connect.oddsockets.tyga.network".to_string(),
         }
     }
 
@@ -61,7 +61,7 @@ mod tests {
     async fn test_discover_manager_url() {
         let discovery = ManagerDiscovery::new();
         let url = discovery.discover_manager_url("ak_test").await.unwrap();
-        assert_eq!(url, "https://manager1.oddsockets.tyga.network");
+        assert_eq!(url, "https://connect.oddsockets.tyga.network");
     }
 
     #[test]
@@ -74,6 +74,6 @@ mod tests {
     async fn test_global_instance() {
         let discovery = get_manager_discovery();
         let url = discovery.discover_manager_url("ak_test").await.unwrap();
-        assert_eq!(url, "https://manager1.oddsockets.tyga.network");
+        assert_eq!(url, "https://connect.oddsockets.tyga.network");
     }
 }

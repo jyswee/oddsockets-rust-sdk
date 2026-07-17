@@ -79,7 +79,7 @@ use oddsockets::OddSocketsConfig;
 use std::time::Duration;
 
 let config = OddSocketsConfig::builder("ak_your_api_key_here")
-    .manager_url("https://your-manager1.oddsockets.tyga.network")
+    .manager_url("https://your-connect.oddsockets.tyga.network")
     .user_id("user123")
     .auto_connect(true)
     .heartbeat_interval(Duration::from_secs(30))

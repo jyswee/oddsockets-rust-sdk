@@ -1,0 +1,35 @@
+OddSockets Rust SDK - live two-client regression proof
+=======================================================
+
+Captured by running `cargo run` with a real OddSockets API key against the
+live platform (Manager -> Worker discovery, genuine Socket.IO WebSocket per
+client). Two SEPARATE connections (alice, bob); no mocks, no local echo.
+
+Scenario 1  core pub/sub: bob publishes, alice receives on her broadcast
+            receiver across an independent connection.
+Scenario 2  enhanced events: bob fires enhanced.start_typing and
+            enhanced.add_reaction; alice receives user_typing and
+            reaction_added on her public on() surface, over the wire.
+
+API key redacted below.
+
+--- transcript ---
+[connect] alice -> w002-oddsockets-1, bob -> w002-oddsockets-1
+
+=== Scenario 1: core pub/sub on demo-core-6a7d18c4f5d76280a9a0 ===
+[alice] subscribed
+[bob] subscribed
+[alice recv] Message { id: "339f1d1e-e7d7-4644-abd1-40949f571388", channel: "demo-core-6a7d18c4f5d76280a9a0", data: Object {"messageType": String("demo"), "text": String("hello from bob nonce=6a7d18c4f5d76280a9a0"), "timestamp": String("2026-07-23T15:47:52.093662+00:00"), "username": String("bob")}, timestamp: 2026-07-23T15:47:52.824328Z, user_id: Some("bob"), metadata: None }
+[bob] published messageId=339f1d1e-e7d7-4644-abd1-40949f571388
+[PASS] alice received bob's message across separate connections
+
+=== Scenario 2: enhanced events on demo-enh-6a7d18c4f5d76280a9a0 ===
+[alice/bob] subscribed to enhanced channel
+[bob] published anchor messageId=b8450b7b-2107-4720-bcfe-dbda44de3340
+[bob] enhanced.start_typing fired
+[bob] enhanced.add_reaction fired
+[alice on user_typing] {"channel":"demo-enh-6a7d18c4f5d76280a9a0","timestamp":"2026-07-23T15:47:56.735Z","userId":"bob"}
+[alice on reaction_added] {"channel":"demo-enh-6a7d18c4f5d76280a9a0","emoji":":thumbsup:","messageId":"b8450b7b-2107-4720-bcfe-dbda44de3340","reactionCounts":[{"_id":":thumbsup:","count":1,"users":[{"userId":"bob","userName":"Bob"}]}],"userId":"bob","userName":"Bob"}
+[PASS] alice received user_typing AND reaction_added from bob
+
+OK - all scenarios verified live through the OddSockets platform

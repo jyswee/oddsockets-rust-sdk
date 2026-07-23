@@ -102,6 +102,7 @@ pub mod error;
 pub mod types;
 pub mod manager_discovery;
 pub mod message_size_validator;
+pub mod enhanced_features;
 
 mod client;
 mod channel;
@@ -109,6 +110,7 @@ mod channel;
 // Re-export main types for convenience
 pub use client::OddSocketsClient;
 pub use channel::OddSocketsChannel;
+pub use enhanced_features::EnhancedFeatures;
 pub use error::{OddSocketsError, Result};
 pub use types::{
     constants, error_codes, message_types, utils, BulkMessage, BulkResult, ConnectionState,

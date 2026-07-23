@@ -491,7 +491,7 @@ impl BulkResult {
     }
 
     /// Gets the error message with a default fallback.
-    pub fn error_message(&self, default: &str) -> &str {
+    pub fn error_message<'a>(&'a self, default: &'a str) -> &'a str {
         self.error.as_deref().unwrap_or(default)
     }
 }

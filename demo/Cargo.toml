@@ -1,0 +1,11 @@
+[package]
+name = "oddsockets-demo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Use the SDK from the parent directory (clone-and-run).
+oddsockets = { path = ".." }
+tokio = { version = "1.32", features = ["full"] }
+serde_json = "1.0"

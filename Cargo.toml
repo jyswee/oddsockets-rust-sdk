@@ -4,6 +4,8 @@ version = "0.1.0-beta.1"
 edition = "2021"
 rust-version = "1.70"
 authors = ["Joe Wee <jyswee@gmail.com>"]
+autoexamples = false
+autobenches = false
 license = "MIT"
 description = "Official Rust SDK for OddSockets real-time messaging platform"
 homepage = "https://oddsockets.com"
@@ -85,22 +87,6 @@ dev = ["tokio/tracing"]
 [[example]]
 name = "basic_usage"
 path = "examples/basic_usage.rs"
-
-[[example]]
-name = "bulk_publishing"
-path = "examples/bulk_publishing.rs"
-
-[[example]]
-name = "chat_application"
-path = "examples/chat_application.rs"
-
-[[example]]
-name = "presence_tracking"
-path = "examples/presence_tracking.rs"
-
-[[bench]]
-name = "performance"
-harness = false
 
 [profile.release]
 lto = true

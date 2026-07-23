@@ -90,6 +90,14 @@ pub enum OddSocketsError {
         message: String,
     },
 
+    /// Operation attempted while the client is not connected
+    #[error("Not connected to OddSockets")]
+    NotConnected,
+
+    /// A request timed out waiting for a server response
+    #[error("Operation timed out")]
+    Timeout,
+
     /// Generic error for unknown conditions
     #[error("Unknown error: {message}")]
     Unknown { message: String },
@@ -129,6 +137,9 @@ impl OddSocketsError {
             OddSocketsError::HttpError { .. } => "HTTP_ERROR",
             OddSocketsError::JsonError { .. } => "JSON_ERROR",
             OddSocketsError::IoError { .. } => "IO_ERROR",
+            OddSocketsError::MessageTooLarge { .. } => "MESSAGE_TOO_LARGE",
+            OddSocketsError::NotConnected => "NOT_CONNECTED",
+            OddSocketsError::Timeout => crate::types::error_codes::OPERATION_TIMEOUT,
             OddSocketsError::Unknown { .. } => "UNKNOWN_ERROR",
         }
     }
@@ -164,6 +175,8 @@ impl OddSocketsError {
             OddSocketsError::JsonError { .. } => false,
             OddSocketsError::IoError { .. } => true,
             OddSocketsError::MessageTooLarge { .. } => false,
+            OddSocketsError::NotConnected => true,
+            OddSocketsError::Timeout => true,
             OddSocketsError::Unknown { .. } => false,
         }
     }
@@ -282,6 +295,16 @@ impl OddSocketsError {
                 "Split large messages into smaller chunks",
                 "Use message compression if applicable",
                 "Consider using file uploads for large content",
+            ],
+            OddSocketsError::NotConnected => vec![
+                "Call connect() before performing this operation",
+                "Check that the client did not disconnect",
+                "Verify your network connection",
+            ],
+            OddSocketsError::Timeout => vec![
+                "Check your internet connection speed",
+                "Retry the operation",
+                "Check if the service is experiencing high load",
             ],
             OddSocketsError::Unknown { .. } => vec![
                 "Check the error message for specific details",
@@ -433,7 +456,7 @@ impl From<tokio_tungstenite::tungstenite::Error> for OddSocketsError {
         let (close_code, close_reason) = match &err {
             WsError::ConnectionClosed => (Some(1000), Some("Connection closed".to_string())),
             WsError::AlreadyClosed => (Some(1001), Some("Already closed".to_string())),
-            WsError::Protocol(msg) => (Some(1002), Some(msg.clone())),
+            WsError::Protocol(msg) => (Some(1002), Some(msg.to_string())),
             WsError::Utf8 => (Some(1003), Some("UTF-8 error".to_string())),
             _ => (None, None),
         };

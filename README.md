@@ -188,6 +188,80 @@ let options = SubscribeOptions::data_channel();
 let mut stream = channel.subscribe(options).await?;
 ```
 
+## ⚡ Enhanced Features
+
+Beyond core pub/sub, OddSockets ships a Slack-like **enhanced surface** — reactions,
+typing indicators, threads, read receipts, presence/status, notifications, DMs,
+channel management, message editing and search. It lives on the `EnhancedFeatures`
+struct, which wraps a shared handle to your connected client. The pattern is always
+the same:
+
+1. **Send** an action with an `enhanced.*` method (snake_case, positional arguments,
+   all `async`).
+2. **Receive** the paired broadcast with `client.on("<event>", |data| { ... })` — the
+   worker forwards every enhanced broadcast onto the client's raw event surface
+   (delivered as a `serde_json::Value`).
+
+`OddSocketsClient` is cheap to clone and every clone shares the same underlying
+socket, so wrapping a clone in `Arc<RwLock<...>>` gives `EnhancedFeatures` a handle to
+the very same connection your listeners are attached to.
+
+```rust
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use oddsockets::{EnhancedFeatures, OddSocketsClient, OddSocketsConfig};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = OddSocketsConfig::new("ak_your_api_key_here");
+    let client = OddSocketsClient::new(config).await?;
+    client.connect().await?;
+
+    let channel = client.channel("room-42");
+    let _stream = channel.subscribe(Default::default()).await?;
+
+    // Receive-path: enhanced broadcasts arrive on the client's raw event surface
+    client.on("user_typing",    |data| println!("someone is typing: {data}"));
+    client.on("reaction_added", |data| println!("reaction added: {data}"));
+    client.on("thread_reply",   |data| println!("new thread reply: {data}"));
+
+    // Send-path: wrap a clone (same socket) for the enhanced surface
+    let enhanced = EnhancedFeatures::new(Arc::new(RwLock::new(client.clone())));
+
+    enhanced.start_typing("alice", "room-42").await?;
+    enhanced.add_reaction("msg-1", "room-42", ":thumbsup:", "alice", "Alice").await?;
+
+    // Request-style methods return the worker response as a serde_json::Value
+    let reply = enhanced
+        .thread_reply("room-42", "msg-1", "Replying in the thread", "alice", "Alice")
+        .await?;
+    println!("thread reply ack: {reply}");
+
+    Ok(())
+}
+```
+
+Fire-and-forget actions return `Result<(), OddSocketsError>`; query and request-style
+methods (`get_*`, `search_*`, `thread_reply`, `create_channel`, …) await the worker
+acknowledgement and return `Result<Value, OddSocketsError>`.
+
+| Area | Requests (`enhanced.*`) | Broadcast events (`client.on`) |
+|------|-------------------------|--------------------------------|
+| Typing | `start_typing`, `stop_typing` | `user_typing`, `user_stopped_typing` |
+| Reactions | `add_reaction`, `remove_reaction`, `get_reactions` | `reaction_added`, `reaction_removed` |
+| Threads | `thread_reply`, `get_thread`, `subscribe_thread`, `follow_thread`, `unfollow_thread`, `mark_thread_read` | `thread_reply`, `thread_subscribed`, `thread_followed`, `thread_read_updated` |
+| Read receipts | `mark_read`, `mark_all_read`, `get_unread_counts` | `user_read`, `unread_count_updated`, `all_marked_read` |
+| Messages | `edit_message`, `delete_message`, `pin_message`, `unpin_message`, `get_pinned_messages` | `message_edited`, `message_deleted`, `message_pinned`, `message_unpinned` |
+| Presence & status | `set_status`, `set_custom_status`, `clear_custom_status`, `set_dnd`, `clear_dnd`, `get_user_presence` | `user_status_changed`, `custom_status_updated`, `dnd_status_changed` |
+| Channels | `create_channel`, `update_channel`, `archive_channel`, `invite_to_channel`, `join_channel`, `leave_channel`, `get_channel_members` | `channel_created`, `channel_updated`, `user_invited`, `user_joined_channel`, `user_left_channel` |
+| DMs | `create_dm`, `send_dm`, `get_dm_conversations` | `dm_created`, `dm_received` |
+| Notifications | `subscribe_notifications`, `get_notifications`, `mark_notification_read`, `clear_notifications` | `notification`, `notification_read`, `notifications_cleared` |
+| Search | `search_messages`, `search_in_channel`, `search_by_user`, `filter_messages` | (query results returned as `Value`) |
+
+For any worker event not wrapped above, subscribe with the raw
+`client.on("<event>", |data| { ... })` API — all enhanced broadcasts are forwarded onto
+the client surface.
+
 ## Message History
 
 ```rust

@@ -691,6 +691,12 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a href="#enhanced" class="nav-link">
+                            <i class="fas fa-bolt nav-icon"></i>
+                            Enhanced Features
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a href="#performance" class="nav-link">
                             <i class="fas fa-chart-line nav-icon"></i>
                             Performance
@@ -809,7 +815,7 @@
                             </button>
                         </div>
                         <pre><code class="language-toml">[dependencies]
-oddsockets = "0.1.0"
+oddsockets = "0.1.0-beta.1"
 tokio = { version = "1.0", features = ["full"] }</code></pre>
                     </div>
                 </div>
@@ -838,7 +844,7 @@ cargo add tokio --features full</code></pre>
                             </button>
                         </div>
                         <pre><code class="language-toml">[dependencies]
-oddsockets = { git = "https://github.com/tygacloud/oddsockets-rust-sdk" }
+oddsockets = { git = "https://github.com/jyswee/oddsockets-rust-sdk" }
 tokio = { version = "1.0", features = ["full"] }</code></pre>
                     </div>
                 </div>
@@ -996,6 +1002,65 @@ let publish_options = PublishOptions::builder()
                         <p>Browse all available examples including async patterns, error handling, and production-ready code</p>
                     </a>
                 </div>
+            </section>
+
+            <section id="enhanced" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-bolt"></i>
+                    Enhanced Features
+                </h2>
+
+                <p>Beyond core pub/sub, OddSockets ships a Slack-like <strong>enhanced surface</strong> &mdash; reactions, typing indicators, threads, read receipts, presence/status, notifications, DMs, channel management, message editing and search. It lives on the <code>EnhancedFeatures</code> struct, which wraps a shared handle to your connected client. You <strong>send</strong> an action with an <code>enhanced.*</code> method (snake_case, positional arguments, all <code>async</code>) and <strong>receive</strong> the paired broadcast with <code>client.on("&lt;event&gt;", |data| { ... })</code> &mdash; the worker forwards every enhanced broadcast onto the client's raw event surface as a <code>serde_json::Value</code>.</p>
+
+                <p><code>OddSocketsClient</code> is cheap to clone and every clone shares the same underlying socket, so wrapping a clone in <code>Arc&lt;RwLock&lt;...&gt;&gt;</code> gives <code>EnhancedFeatures</code> a handle to the very same connection your listeners are attached to.</p>
+
+                <h3>Typing &amp; Reactions</h3>
+                <pre><code class="language-rust">use std::sync::Arc;
+use tokio::sync::RwLock;
+use oddsockets::{EnhancedFeatures, OddSocketsClient, OddSocketsConfig};
+
+let config = OddSocketsConfig::new("ak_your_api_key_here");
+let client = OddSocketsClient::new(config).await?;
+client.connect().await?;
+
+let channel = client.channel("room-42");
+let _stream = channel.subscribe(Default::default()).await?;
+
+// Receive-path: enhanced broadcasts arrive on the client's raw event surface
+client.on("user_typing",    |data| println!("someone is typing: {data}"));
+client.on("reaction_added", |data| println!("reaction added: {data}"));
+
+// Send-path: wrap a clone (same socket) for the enhanced surface
+let enhanced = EnhancedFeatures::new(Arc::new(RwLock::new(client.clone())));
+
+enhanced.start_typing("alice", "room-42").await?;
+enhanced.add_reaction("msg-1", "room-42", ":thumbsup:", "alice", "Alice").await?;</code></pre>
+
+                <h3>Threads</h3>
+                <pre><code class="language-rust">client.on("thread_reply", |data| println!("new thread reply: {data}"));
+
+// Request-style methods return the worker response as a serde_json::Value
+let reply = enhanced
+    .thread_reply("room-42", "msg-1", "Replying in the thread", "alice", "Alice")
+    .await?;
+println!("thread reply ack: {reply}");</code></pre>
+
+                <p>Fire-and-forget actions return <code>Result&lt;(), OddSocketsError&gt;</code>; query and request-style methods (<code>get_*</code>, <code>search_*</code>, <code>thread_reply</code>, <code>create_channel</code>, &hellip;) await the worker acknowledgement and return <code>Result&lt;Value, OddSocketsError&gt;</code>.</p>
+
+                <ul>
+                    <li><strong>Typing</strong>: <code>start_typing</code>, <code>stop_typing</code> &rarr; <code>user_typing</code>, <code>user_stopped_typing</code></li>
+                    <li><strong>Reactions</strong>: <code>add_reaction</code>, <code>remove_reaction</code>, <code>get_reactions</code> &rarr; <code>reaction_added</code>, <code>reaction_removed</code></li>
+                    <li><strong>Threads</strong>: <code>thread_reply</code>, <code>get_thread</code>, <code>subscribe_thread</code>, <code>follow_thread</code>, <code>unfollow_thread</code>, <code>mark_thread_read</code> &rarr; <code>thread_reply</code>, <code>thread_subscribed</code>, <code>thread_followed</code>, <code>thread_read_updated</code></li>
+                    <li><strong>Read receipts</strong>: <code>mark_read</code>, <code>mark_all_read</code>, <code>get_unread_counts</code> &rarr; <code>user_read</code>, <code>unread_count_updated</code>, <code>all_marked_read</code></li>
+                    <li><strong>Messages</strong>: <code>edit_message</code>, <code>delete_message</code>, <code>pin_message</code>, <code>unpin_message</code>, <code>get_pinned_messages</code> &rarr; <code>message_edited</code>, <code>message_deleted</code>, <code>message_pinned</code>, <code>message_unpinned</code></li>
+                    <li><strong>Presence &amp; status</strong>: <code>set_status</code>, <code>set_custom_status</code>, <code>clear_custom_status</code>, <code>set_dnd</code>, <code>clear_dnd</code>, <code>get_user_presence</code> &rarr; <code>user_status_changed</code>, <code>custom_status_updated</code>, <code>dnd_status_changed</code></li>
+                    <li><strong>Channels</strong>: <code>create_channel</code>, <code>update_channel</code>, <code>archive_channel</code>, <code>invite_to_channel</code>, <code>join_channel</code>, <code>leave_channel</code>, <code>get_channel_members</code> &rarr; <code>channel_created</code>, <code>channel_updated</code>, <code>user_invited</code>, <code>user_joined_channel</code>, <code>user_left_channel</code></li>
+                    <li><strong>DMs</strong>: <code>create_dm</code>, <code>send_dm</code>, <code>get_dm_conversations</code> &rarr; <code>dm_created</code>, <code>dm_received</code></li>
+                    <li><strong>Notifications</strong>: <code>subscribe_notifications</code>, <code>get_notifications</code>, <code>mark_notification_read</code>, <code>clear_notifications</code> &rarr; <code>notification</code>, <code>notification_read</code>, <code>notifications_cleared</code></li>
+                    <li><strong>Search</strong>: <code>search_messages</code>, <code>search_in_channel</code>, <code>search_by_user</code>, <code>filter_messages</code> (query results returned as <code>Value</code>)</li>
+                </ul>
+
+                <p>For any worker event not wrapped above, subscribe with the raw <code>client.on("&lt;event&gt;", |data| { ... })</code> API &mdash; all enhanced broadcasts are forwarded onto the client surface.</p>
             </section>
 
             <section id="performance" class="section">

@@ -449,9 +449,19 @@ fn dispatch(inner: &Arc<Inner>, event: &str, payload: Value) {
         .to_string();
 
     // 1. Correlated request/response.
-    let key = format!("{}:{}", event, channel);
-    if let Some(tx) = inner.pending.lock().unwrap().remove(&key) {
-        let _ = tx.send(Ok(payload.clone()));
+    //
+    // The worker emits "history" both as the explicit get_history RESPONSE
+    // (query:true) and as a fire-and-forget on-join snapshot (~10 msgs, no query
+    // flag). Only the query:true response may satisfy a pending get_history
+    // waiter; ignore the snapshot here so it can't resolve get_history with the
+    // wrong data. BUG-2026-0727-0012.
+    let is_history_snapshot =
+        event == "history" && payload.get("query").and_then(Value::as_bool) != Some(true);
+    if !is_history_snapshot {
+        let key = format!("{}:{}", event, channel);
+        if let Some(tx) = inner.pending.lock().unwrap().remove(&key) {
+            let _ = tx.send(Ok(payload.clone()));
+        }
     }
 
     // 2. Delivered messages -> per-channel broadcast fan-out.

@@ -321,9 +321,11 @@ impl OddSocketsClient {
     }
 
     async fn get_worker_assignment(&self) -> Result<String> {
-        let manager_url = crate::manager_discovery::get_manager_discovery()
-            .discover_manager_url(&self.inner.config.api_key)
-            .await?;
+        let manager_url = crate::manager_discovery::ManagerDiscovery::new(Some(
+            self.inner.config.manager_url.as_str(),
+        ))?
+        .discover_manager_url()
+        .await?;
 
         let http = reqwest::Client::new();
         let resp = http

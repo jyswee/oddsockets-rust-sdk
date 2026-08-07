@@ -141,12 +141,26 @@ pub struct OddSocketsConfig {
     pub timeout: Duration,
 }
 
+/// Returns the manager URL to use when the caller configures none.
+///
+/// Honours the `ODDSOCKETS_MANAGER_URL` environment variable, falling back to
+/// [`constants::DEFAULT_MANAGER_URL`]. Resolving here keeps the effective
+/// endpoint visible on the config, so callers can see which manager the client
+/// will actually contact rather than discovering it only from network traffic.
+pub fn default_manager_url() -> String {
+    std::env::var(crate::manager_discovery::MANAGER_URL_ENV_VAR)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| constants::DEFAULT_MANAGER_URL.to_string())
+}
+
 impl OddSocketsConfig {
     /// Creates a new configuration with the given API key and default values.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
-            manager_url: constants::DEFAULT_MANAGER_URL.to_string(),
+            manager_url: default_manager_url(),
             user_id: None,
             auto_connect: true,
             reconnect_attempts: constants::DEFAULT_RECONNECT_ATTEMPTS,
@@ -179,6 +193,8 @@ impl OddSocketsConfig {
                 message: "Manager URL is required".to_string(),
             });
         }
+
+        crate::manager_discovery::validate_manager_url(&self.manager_url)?;
 
         if self.timeout.is_zero() {
             return Err(crate::error::OddSocketsError::InvalidConfiguration {

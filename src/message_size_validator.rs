@@ -6,9 +6,19 @@
 use crate::error::{OddSocketsError, Result};
 use serde_json::Value;
 
-/// Message size limits (industry standard - matches PubNub)
+/// Message size limits (industry standard)
 pub const MAX_MESSAGE_SIZE: usize = 32768; // 32KB in bytes
 pub const MAX_MESSAGE_SIZE_KB: usize = 32;
+
+/// Convert a byte count to KB, rounding up.
+///
+/// Rounding up matters: truncating division reports a 32769-byte message as
+/// `32KB`, which is exactly the limit, producing the nonsensical error
+/// "Message size (32KB) exceeds maximum allowed size of 32KB" and making an
+/// over-limit message look like it was within bounds.
+fn size_in_kb(bytes: usize) -> usize {
+    (bytes + 1023) / 1024
+}
 
 /// Validate message size
 ///
@@ -26,12 +36,12 @@ pub fn validate_message_size(message: &Value) -> Result<usize> {
     
     if message_size > MAX_MESSAGE_SIZE {
         return Err(OddSocketsError::MessageTooLarge {
-            size_kb: message_size / 1024,
+            size_kb: size_in_kb(message_size),
             max_size_kb: MAX_MESSAGE_SIZE_KB,
             message: format!(
                 "Message size ({}KB) exceeds maximum allowed size of {}KB. \
-                This limit matches industry standards (PubNub, Socket.IO) for reliable real-time messaging.",
-                message_size / 1024,
+                This limit keeps real-time delivery reliable.",
+                size_in_kb(message_size),
                 MAX_MESSAGE_SIZE_KB
             ),
         });
@@ -55,12 +65,12 @@ pub fn validate_string_message_size(message: &str) -> Result<usize> {
     
     if message_size > MAX_MESSAGE_SIZE {
         return Err(OddSocketsError::MessageTooLarge {
-            size_kb: message_size / 1024,
+            size_kb: size_in_kb(message_size),
             max_size_kb: MAX_MESSAGE_SIZE_KB,
             message: format!(
                 "Message size ({}KB) exceeds maximum allowed size of {}KB. \
-                This limit matches industry standards (PubNub, Socket.IO) for reliable real-time messaging.",
-                message_size / 1024,
+                This limit keeps real-time delivery reliable.",
+                size_in_kb(message_size),
                 MAX_MESSAGE_SIZE_KB
             ),
         });
@@ -116,6 +126,26 @@ mod tests {
             assert!(size_kb > max_size_kb);
         } else {
             panic!("Expected MessageTooLarge error");
+        }
+    }
+
+    #[test]
+    fn test_reported_kb_exceeds_limit_just_over_boundary() {
+        // One byte over the limit must still report a size strictly greater than
+        // the maximum. Truncating division reported this as 32KB - exactly the
+        // limit - so the error claimed 32KB exceeded 32KB.
+        let just_over = "x".repeat(MAX_MESSAGE_SIZE + 1);
+
+        match validate_string_message_size(&just_over) {
+            Err(OddSocketsError::MessageTooLarge { size_kb, max_size_kb, .. }) => {
+                assert!(
+                    size_kb > max_size_kb,
+                    "reported {}KB against a {}KB limit",
+                    size_kb,
+                    max_size_kb
+                );
+            }
+            _ => panic!("Expected MessageTooLarge error"),
         }
     }
 

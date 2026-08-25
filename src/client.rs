@@ -47,6 +47,12 @@ struct Inner {
     connect_signal: Mutex<Option<oneshot::Sender<Result<()>>>>,
     worker_url: Mutex<Option<String>>,
     worker_id: Mutex<Option<String>>,
+    /// Current minted realtime token (token-auth mode). (FEAT-2026-0824-0040)
+    current_token: Mutex<Option<String>>,
+    /// Epoch-millis expiry of the current minted token, if known.
+    token_expires_at: Mutex<Option<i64>>,
+    /// Background auto-refresh task, aborted on disconnect.
+    refresh_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 /// The main OddSockets client.
@@ -80,6 +86,9 @@ impl OddSocketsClient {
                 connect_signal: Mutex::new(None),
                 worker_url: Mutex::new(None),
                 worker_id: Mutex::new(None),
+                current_token: Mutex::new(None),
+                token_expires_at: Mutex::new(None),
+                refresh_handle: Mutex::new(None),
             }),
         })
     }
@@ -108,6 +117,12 @@ impl OddSocketsClient {
             .unwrap_or_else(|| self.inner.client_identifier.clone())
     }
 
+    /// Returns true when authenticating with a minted-token provider rather than
+    /// an API key. (FEAT-2026-0824-0040)
+    pub fn is_token_mode(&self) -> bool {
+        self.inner.config.token_provider.is_some()
+    }
+
     /// Connects to OddSockets: discovers a worker, opens the WebSocket, completes
     /// the Engine.IO / Socket.IO handshake and authenticates.
     pub async fn connect(&self) -> Result<()> {
@@ -118,6 +133,15 @@ impl OddSocketsClient {
             }
         }
         *self.inner.state.lock().unwrap() = ConnectionState::Connecting;
+
+        // Step 0: in token mode, mint a fresh token before discovery so the
+        // worker selection and handshake carry it. (FEAT-2026-0824-0040)
+        if self.is_token_mode() {
+            if let Err(e) = self.resolve_token().await {
+                *self.inner.state.lock().unwrap() = ConnectionState::Disconnected;
+                return Err(e);
+            }
+        }
 
         let assignment = self.get_worker_assignment().await;
         let worker_url = match assignment {
@@ -156,6 +180,9 @@ impl OddSocketsClient {
         match timeout(timeout_dur, rx).await {
             Ok(Ok(Ok(()))) => {
                 *self.inner.state.lock().unwrap() = ConnectionState::Connected;
+                if self.is_token_mode() {
+                    self.schedule_token_refresh();
+                }
                 Ok(())
             }
             Ok(Ok(Err(e))) => {
@@ -174,6 +201,10 @@ impl OddSocketsClient {
     /// Disconnects from OddSockets and tears down the socket.
     pub async fn disconnect(&self) -> Result<()> {
         *self.inner.state.lock().unwrap() = ConnectionState::Disconnected;
+        // Stop the token auto-refresh task. (FEAT-2026-0824-0040)
+        if let Some(handle) = self.inner.refresh_handle.lock().unwrap().take() {
+            handle.abort();
+        }
         // Best-effort Socket.IO + Engine.IO close, then drop the writer.
         if let Some(mut writer) = self.inner.writer.lock().await.take() {
             let _ = writer.send(WsMessage::Text("41".to_string())).await;
@@ -320,6 +351,61 @@ impl OddSocketsClient {
             .map_err(OddSocketsError::from)
     }
 
+    /// Mints a fresh token via the configured provider and records its expiry.
+    /// (FEAT-2026-0824-0040)
+    async fn resolve_token(&self) -> Result<()> {
+        let provider = match &self.inner.config.token_provider {
+            Some(p) => p.clone(),
+            None => return Ok(()),
+        };
+        let minted = provider.call().await?;
+        if minted.token.is_empty() {
+            return Err(OddSocketsError::AuthenticationFailed {
+                message: "Token provider returned an empty token".to_string(),
+            });
+        }
+        let expiry = expiry_from_token(&minted);
+        *self.inner.current_token.lock().unwrap() = Some(minted.token);
+        *self.inner.token_expires_at.lock().unwrap() = expiry;
+        Ok(())
+    }
+
+    /// Spawns a background loop that refreshes the minted token ahead of expiry,
+    /// swapping the new credential in place for the next (re)connect and emitting
+    /// a `token_refreshed` event. (FEAT-2026-0824-0040)
+    fn schedule_token_refresh(&self) {
+        if let Some(handle) = self.inner.refresh_handle.lock().unwrap().take() {
+            handle.abort();
+        }
+        let client = self.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                let expiry = match *client.inner.token_expires_at.lock().unwrap() {
+                    Some(e) => e,
+                    None => break, // no expiry info -> cannot schedule
+                };
+                let lead = client.inner.config.token_refresh_lead_ms as i64;
+                let delay = (expiry - now_ms() - lead).max(1_000);
+                tokio::time::sleep(Duration::from_millis(delay as u64)).await;
+                if !client.is_connected() {
+                    break;
+                }
+                match client.resolve_token().await {
+                    Ok(()) => {
+                        let expires_at = *client.inner.token_expires_at.lock().unwrap();
+                        dispatch(
+                            &client.inner,
+                            "token_refreshed",
+                            json!({ "expiresAt": expires_at }),
+                        );
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        *self.inner.refresh_handle.lock().unwrap() = Some(handle);
+    }
+
     async fn get_worker_assignment(&self) -> Result<String> {
         let manager_url = crate::manager_discovery::ManagerDiscovery::new(Some(
             self.inner.config.manager_url.as_str(),
@@ -327,11 +413,22 @@ impl OddSocketsClient {
         .discover_manager_url()
         .await?;
 
+        // In token mode present the minted token instead of the API key.
+        // (FEAT-2026-0824-0040)
+        let credential: (&str, String) = if self.is_token_mode() {
+            (
+                "token",
+                self.inner.current_token.lock().unwrap().clone().unwrap_or_default(),
+            )
+        } else {
+            ("apiKey", self.inner.config.api_key.clone())
+        };
+
         let http = reqwest::Client::new();
         let resp = http
             .get(format!("{}/api/cluster/select-worker", manager_url))
             .query(&[
-                ("apiKey", self.inner.config.api_key.as_str()),
+                (credential.0, credential.1.as_str()),
                 ("userId", self.user_id().as_str()),
                 ("clientIdentifier", self.inner.client_identifier.as_str()),
             ])
@@ -380,11 +477,21 @@ async fn read_loop(inner: Arc<Inner>, mut reader: futures_util::stream::SplitStr
         let engine_type = text.as_bytes()[0];
         match engine_type {
             b'0' => {
-                // Engine.IO OPEN -> send Socket.IO CONNECT with auth.
-                let auth = json!({
-                    "apiKey": inner.config.api_key,
-                    "userId": inner.config.user_id,
-                });
+                // Engine.IO OPEN -> send Socket.IO CONNECT with auth. In token
+                // mode present the minted token instead of the API key so a
+                // refreshed token is picked up on the next (re)connect.
+                // (FEAT-2026-0824-0040)
+                let token = inner.current_token.lock().unwrap().clone();
+                let auth = match token {
+                    Some(tok) if !tok.is_empty() => json!({
+                        "token": tok,
+                        "userId": inner.config.user_id,
+                    }),
+                    _ => json!({
+                        "apiKey": inner.config.api_key,
+                        "userId": inner.config.user_id,
+                    }),
+                };
                 let connect_frame = format!("40{}", auth);
                 send_raw(&inner, connect_frame).await;
             }
@@ -519,6 +626,64 @@ async fn send_raw(inner: &Arc<Inner>, frame: String) {
 }
 
 // ---- helpers -------------------------------------------------------------
+
+/// Current wall-clock time in epoch milliseconds.
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+/// Resolves a minted token's expiry to epoch milliseconds, preferring the
+/// explicit `exp`/`expiresAt` fields and falling back to the JWT payload.
+/// (FEAT-2026-0824-0040)
+fn expiry_from_token(token: &crate::types::OddSocketsToken) -> Option<i64> {
+    if let Some(exp) = token.exp {
+        return Some(exp * 1000);
+    }
+    if let Some(ref iso) = token.expires_at {
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(iso) {
+            return Some(dt.timestamp_millis());
+        }
+    }
+    expiry_from_jwt(&token.token)
+}
+
+/// Extracts the `exp` claim (epoch millis) from a JWT without verifying it.
+fn expiry_from_jwt(jwt: &str) -> Option<i64> {
+    let payload_b64 = jwt.split('.').nth(1)?;
+    let payload = base64url_decode(payload_b64)?;
+    let value: Value = serde_json::from_slice(&payload).ok()?;
+    value.get("exp").and_then(Value::as_i64).map(|e| e * 1000)
+}
+
+/// Minimal, dependency-free base64url decoder (no padding required).
+fn base64url_decode(input: &str) -> Option<Vec<u8>> {
+    fn val(c: u8) -> Option<u8> {
+        match c {
+            b'A'..=b'Z' => Some(c - b'A'),
+            b'a'..=b'z' => Some(c - b'a' + 26),
+            b'0'..=b'9' => Some(c - b'0' + 52),
+            b'-' => Some(62),
+            b'_' => Some(63),
+            _ => None,
+        }
+    }
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for &c in input.as_bytes() {
+        if c == b'=' {
+            break;
+        }
+        let v = val(c)? as u32;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Some(out)
+}
 
 /// Builds the Engine.IO WebSocket URL from an `http(s)` worker URL.
 fn build_ws_url(worker_url: &str) -> Result<String> {

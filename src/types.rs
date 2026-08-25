@@ -6,8 +6,86 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
+
+/// A minted realtime token returned by a [`TokenProvider`].
+///
+/// Only [`OddSocketsToken::token`] is required; the expiry fields let the SDK
+/// schedule an ahead-of-expiry refresh without decoding the JWT itself.
+/// (FEAT-2026-0824-0040)
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct OddSocketsToken {
+    /// The minted realtime token (JWT) presented instead of an API key.
+    pub token: String,
+    /// Optional ISO-8601 expiry.
+    #[serde(rename = "expiresAt", default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    /// Optional epoch-seconds expiry claim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exp: Option<i64>,
+    /// Optional manager base URL the token is scoped to.
+    #[serde(rename = "baseUrl", default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Optional resolved caller identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+}
+
+impl OddSocketsToken {
+    /// Creates a token from just the minted value.
+    pub fn new(token: impl Into<String>) -> Self {
+        Self {
+            token: token.into(),
+            ..Default::default()
+        }
+    }
+}
+
+/// The future returned by a [`TokenProvider`] callback.
+pub type TokenFuture =
+    Pin<Box<dyn Future<Output = crate::error::Result<OddSocketsToken>> + Send>>;
+
+/// An async callback that mints a fresh realtime token, used INSTEAD of an API
+/// key by game clients that exchange a player JWT for a short-lived scoped token
+/// via the OddSockets `/v1/token` front door. Called before every (re)connect
+/// and again shortly before the token expires. (FEAT-2026-0824-0040)
+#[derive(Clone)]
+pub struct TokenProvider(Arc<dyn Fn() -> TokenFuture + Send + Sync>);
+
+impl TokenProvider {
+    /// Wraps an async closure as a token provider.
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn() -> TokenFuture + Send + Sync + 'static,
+    {
+        Self(Arc::new(f))
+    }
+
+    /// Invokes the provider, returning the pending token future.
+    pub fn call(&self) -> TokenFuture {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for TokenProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TokenProvider(<fn>)")
+    }
+}
+
+// Two providers are considered equal iff they are the same underlying closure;
+// this only exists so `OddSocketsConfig` can keep deriving `PartialEq`/`Eq`.
+impl PartialEq for TokenProvider {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for TokenProvider {}
 
 /// SDK version and metadata constants.
 pub mod constants {
@@ -125,8 +203,12 @@ impl std::fmt::Display for EventType {
 /// Configuration for the OddSockets client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OddSocketsConfig {
-    /// API key for authentication
+    /// API key for authentication (empty when authenticating with a token provider)
     pub api_key: String,
+    /// Async minted-token provider used INSTEAD of an API key. (FEAT-2026-0824-0040)
+    pub token_provider: Option<TokenProvider>,
+    /// How many milliseconds before expiry a minted token is refreshed.
+    pub token_refresh_lead_ms: u64,
     /// Manager URL for worker assignment
     pub manager_url: String,
     /// Optional user ID
@@ -160,6 +242,8 @@ impl OddSocketsConfig {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
+            token_provider: None,
+            token_refresh_lead_ms: 120_000,
             manager_url: default_manager_url(),
             user_id: None,
             auto_connect: true,
@@ -169,23 +253,44 @@ impl OddSocketsConfig {
         }
     }
 
+    /// Creates a configuration authenticated with an async minted-token provider
+    /// instead of an API key. (FEAT-2026-0824-0040)
+    pub fn with_token_provider(provider: TokenProvider) -> Self {
+        let mut config = Self::new("");
+        config.token_provider = Some(provider);
+        config
+    }
+
     /// Creates a builder for this configuration.
     pub fn builder(api_key: impl Into<String>) -> OddSocketsConfigBuilder {
         OddSocketsConfigBuilder::new(api_key)
     }
 
+    /// Creates a builder authenticated with a minted-token provider instead of an
+    /// API key. (FEAT-2026-0824-0040)
+    pub fn builder_with_token_provider(provider: TokenProvider) -> OddSocketsConfigBuilder {
+        OddSocketsConfigBuilder {
+            config: Self::with_token_provider(provider),
+        }
+    }
+
     /// Validates the configuration.
     pub fn validate(&self) -> Result<(), crate::error::OddSocketsError> {
-        if self.api_key.is_empty() {
-            return Err(crate::error::OddSocketsError::InvalidConfiguration {
-                message: "API key is required".to_string(),
-            });
-        }
+        // Either an API key or a token provider is acceptable. A game client using
+        // minted tokens has no `ak_` key, so the format check only applies in key
+        // mode. (FEAT-2026-0824-0040)
+        if self.token_provider.is_none() {
+            if self.api_key.is_empty() {
+                return Err(crate::error::OddSocketsError::InvalidConfiguration {
+                    message: "Either an API key or a token provider is required".to_string(),
+                });
+            }
 
-        if !self.api_key.starts_with("ak_") {
-            return Err(crate::error::OddSocketsError::InvalidApiKey {
-                message: "Invalid API key format".to_string(),
-            });
+            if !self.api_key.starts_with("ak_") {
+                return Err(crate::error::OddSocketsError::InvalidApiKey {
+                    message: "Invalid API key format".to_string(),
+                });
+            }
         }
 
         if self.manager_url.is_empty() {
@@ -224,6 +329,20 @@ impl OddSocketsConfigBuilder {
         Self {
             config: OddSocketsConfig::new(api_key),
         }
+    }
+
+    /// Sets an async minted-token provider used instead of an API key.
+    /// (FEAT-2026-0824-0040)
+    pub fn token_provider(mut self, provider: TokenProvider) -> Self {
+        self.config.token_provider = Some(provider);
+        self
+    }
+
+    /// Sets how many milliseconds before expiry a minted token is refreshed
+    /// (default: 120000).
+    pub fn token_refresh_lead_ms(mut self, lead_ms: u64) -> Self {
+        self.config.token_refresh_lead_ms = lead_ms;
+        self
     }
 
     /// Sets the manager URL.

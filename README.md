@@ -107,6 +107,44 @@ let config = OddSocketsConfig::builder("ak_your_api_key_here")
     .build()?;
 ```
 
+### Token auth for game clients (`TokenProvider`)
+
+Game and app clients that must not embed a long-lived API key can authenticate
+with short-lived minted tokens instead. Supply an async `TokenProvider` **instead
+of** an API key. The SDK calls it before every (re)connect, sends the minted
+token in place of the API key on worker selection and the Socket.IO handshake,
+and refreshes the token ahead of its expiry — swapping the new credential in for
+the next (re)connect and emitting a `token_refreshed` event.
+
+```rust
+use oddsockets::{OddSocketsConfig, OddSocketsToken, TokenProvider};
+
+let provider = TokenProvider::new(|| {
+    Box::pin(async move {
+        // Exchange your player's session/JWT for a scoped realtime token via your
+        // backend or the OddSockets /v1/token front door.
+        let minted = my_backend_mint_token().await?; // -> OddSocketsToken
+        Ok(minted)
+    })
+});
+
+let config = OddSocketsConfig::builder_with_token_provider(provider)
+    .token_refresh_lead_ms(120_000) // refresh 2 min before expiry (default)
+    .build()?;
+
+let client = OddSocketsClient::new(config).await?;
+client.connect().await?;
+
+client.on("token_refreshed", |payload| {
+    println!("realtime token refreshed: {payload}");
+});
+```
+
+`OddSocketsToken` carries the minted `token` (required) plus optional `expires_at`
+(ISO-8601), `exp` (epoch seconds), `base_url`, and `identity`. Only `token` is
+required; the expiry fields let the SDK schedule an ahead-of-expiry refresh
+without decoding the JWT itself.
+
 ## 📨 Publishing Messages
 
 ### Individual Messages

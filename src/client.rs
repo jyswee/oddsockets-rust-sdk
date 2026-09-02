@@ -29,6 +29,47 @@ type Writer = SplitSink<WsStream, WsMessage>;
 /// A callback registered via [`OddSocketsClient::on`].
 type RawListener = Arc<dyn Fn(Value) + Send + Sync>;
 
+/// Enhanced-feature broadcast events the worker delivers to OTHER members of a
+/// room. Subscribe with [`OddSocketsClient::on`] (e.g. `client.on("reaction_added", ..)`).
+/// These are the fire-and-forget broadcasts; the request/response acks consumed
+/// by [`crate::enhanced_features::EnhancedFeatures`] methods are intentionally
+/// NOT in this list.
+pub const ENHANCED_BROADCAST_EVENTS: &[&str] = &[
+    "reaction_added",
+    "reaction_removed",
+    "user_typing",
+    "user_stopped_typing",
+    "user_read",
+    "unread_count_updated",
+    "all_marked_read",
+    "thread_reply",
+    "thread_subscribed",
+    "thread_followed",
+    "thread_unfollowed",
+    "thread_read_updated",
+    "dm_created",
+    "dm_received",
+    "notification",
+    "notification_read",
+    "all_notifications_read",
+    "notifications_cleared",
+    "channel_created",
+    "channel_updated",
+    "user_invited",
+    "user_joined_channel",
+    "user_left_channel",
+    "user_removed",
+    // Challenge / leaderboard / achievement broadcasts.
+    "challenge_progress",
+    "leaderboard_rank_change",
+    "challenge_complete",
+    "achievement_unlock",
+    "achievement_progress",
+    "challenge_invited",
+    "challenge_reply_received",
+    "challenge_invite_cancelled",
+];
+
 /// Shared, reference-counted client state.
 struct Inner {
     config: OddSocketsConfig,

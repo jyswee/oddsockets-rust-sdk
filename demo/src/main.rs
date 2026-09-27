@@ -15,7 +15,7 @@
 //!   broadcasts across the wire.
 //!
 //! Run:
-//!   export ODDSOCKETS_API_KEY="ak_..."   # get a free key: see README
+//!   export ODDSOCKETS_API_KEY="ak_..."   # get an API key: see README
 //!   cargo run
 //!
 //! Exit codes: 0 all green, 1 missing key / setup, 2 a scenario timed out.
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key = match std::env::var("ODDSOCKETS_API_KEY") {
         Ok(k) if !k.is_empty() => k,
         _ => {
-            eprintln!("Missing ODDSOCKETS_API_KEY. Get a free key (see README), then:");
+            eprintln!("Missing ODDSOCKETS_API_KEY. Get an API key (see README), then:");
             eprintln!("  export ODDSOCKETS_API_KEY=\"ak_...\"");
             std::process::exit(1);
         }

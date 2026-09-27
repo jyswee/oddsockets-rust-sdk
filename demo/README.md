@@ -20,7 +20,7 @@ proof the enhanced surface is wired to the real transport, not a local echo.
 ## Run it
 
 ```bash
-export ODDSOCKETS_API_KEY="ak_..."   # get a free key at https://oddsockets.com
+export ODDSOCKETS_API_KEY="ak_..."   # get an API key at https://oddsockets.com
 cargo run
 ```
 

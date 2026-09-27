@@ -282,6 +282,64 @@ impl OddSocketsClient {
         Ok(results)
     }
 
+    /// Fetches this tenant's headline usage analytics (MAU / DAU / total
+    /// messages / error rate) from the manager.
+    ///
+    /// Requires an API key: keyless/token-only clients have no owner scope to
+    /// query, so this returns an error in token mode. Tiles are returned
+    /// verbatim — a metric that is not live yet comes back as `None`, never a
+    /// fabricated `0`, so callers can render an em-dash.
+    pub async fn get_usage_stats(&self) -> Result<crate::types::UsageStats> {
+        if self.is_token_mode() || self.inner.config.api_key.is_empty() {
+            return Err(OddSocketsError::InvalidConfiguration {
+                message:
+                    "getUsageStats requires an apiKey (keyless/token clients have no owner scope to query)"
+                        .to_string(),
+            });
+        }
+
+        let manager_url = crate::manager_discovery::ManagerDiscovery::new(Some(
+            self.inner.config.manager_url.as_str(),
+        ))?
+        .discover_manager_url()
+        .await?;
+
+        let http = reqwest::Client::new();
+        let resp = http
+            .get(format!("{}/api/tenant/usage", manager_url))
+            .header("X-API-Key", self.inner.config.api_key.as_str())
+            .header("User-Agent", crate::types::constants::USER_AGENT)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(OddSocketsError::HttpError {
+                message: format!("Manager returned HTTP {}", resp.status().as_u16()),
+                status: Some(resp.status().as_u16()),
+            });
+        }
+
+        let body: Value = resp.json().await?;
+        let tiles = body.get("tiles").cloned().unwrap_or(Value::Null);
+        // Preserve nulls: a missing/null tile stays None, never coerced to 0.
+        Ok(crate::types::UsageStats {
+            mau: tiles.get("mau").and_then(Value::as_i64),
+            dau: tiles.get("dau").and_then(Value::as_i64),
+            total_messages: tiles.get("totalMessages").and_then(Value::as_i64),
+            error_rate: tiles.get("errorRate").and_then(Value::as_f64),
+            owner_scope: body
+                .get("ownerScope")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            detail: body.get("detail").and_then(Value::as_str).map(str::to_string),
+            timestamp: body
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        })
+    }
+
     /// Registers a persistent listener for a raw transport event.
     ///
     /// This is the public surface enhanced broadcasts (`user_typing`,

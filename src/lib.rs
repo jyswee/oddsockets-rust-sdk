@@ -116,6 +116,7 @@ pub use types::{
     constants, error_codes, message_types, utils, BulkMessage, BulkResult, ConnectionState,
     EventType, HistoryOptions, Message, OddSocketsConfig, OddSocketsConfigBuilder, OddSocketsToken,
     PresenceInfo, PublishOptions, PublishResult, SubscribeOptions, TokenFuture, TokenProvider,
+    UsageStats,
 };
 
 /// Prelude module for convenient imports.
@@ -133,7 +134,7 @@ pub mod prelude {
     pub use crate::types::{
         message_types, utils, BulkMessage, BulkResult, ConnectionState, EventType, HistoryOptions,
         Message, OddSocketsConfig, OddSocketsConfigBuilder, OddSocketsToken, PresenceInfo,
-        PublishOptions, PublishResult, SubscribeOptions, TokenFuture, TokenProvider,
+        PublishOptions, PublishResult, SubscribeOptions, TokenFuture, TokenProvider, UsageStats,
     };
 }
 

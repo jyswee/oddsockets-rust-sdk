@@ -412,6 +412,31 @@ impl OddSocketsConfigBuilder {
     }
 }
 
+/// Headline usage analytics for the API key's owner scope, as returned by
+/// [`crate::OddSocketsClient::get_usage_stats`].
+///
+/// Each tile is `Option` on purpose: a metric that is not live yet comes back
+/// as `None` (JSON `null`) and MUST NOT be coerced to `0`. A `None` means "no
+/// data" while `Some(0)` means "measured zero" — callers rendering a dashboard
+/// need to tell those apart (e.g. show an em-dash for `None`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageStats {
+    /// Monthly active users, or `None` if the metric is not available.
+    pub mau: Option<i64>,
+    /// Daily active users, or `None` if the metric is not available.
+    pub dau: Option<i64>,
+    /// Total messages, or `None` if the metric is not available.
+    pub total_messages: Option<i64>,
+    /// Error rate, or `None` if the metric is not available.
+    pub error_rate: Option<f64>,
+    /// The owner scope these figures are aggregated for.
+    pub owner_scope: Option<String>,
+    /// Optional human-readable detail about the figures.
+    pub detail: Option<String>,
+    /// Server timestamp for when the figures were produced.
+    pub timestamp: Option<String>,
+}
+
 /// Represents a message in the OddSockets system.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {

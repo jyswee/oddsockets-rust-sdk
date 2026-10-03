@@ -46,11 +46,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Two independent clients on two independent connections.
     let alice = connect(&api_key, "alice").await?;
     let bob = connect(&api_key, "bob").await?;
-    println!(
-        "[connect] alice -> {}, bob -> {}",
-        alice.worker_id().unwrap_or_else(|| "?".into()),
-        bob.worker_id().unwrap_or_else(|| "?".into())
-    );
 
     scenario_core(&alice, &bob, &nonce).await?;
     scenario_enhanced(&alice, &bob, &nonce).await?;

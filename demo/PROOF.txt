@@ -14,7 +14,6 @@ Scenario 2  enhanced events: bob fires enhanced.start_typing and
 API key redacted below.
 
 --- transcript ---
-[connect] alice -> [instance], bob -> [instance]
 
 === Scenario 1: core pub/sub on demo-core-6a7d18c4f5d76280a9a0 ===
 [alice] subscribed
